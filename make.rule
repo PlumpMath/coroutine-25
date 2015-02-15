@@ -1,0 +1,24 @@
+all: default
+
+CXX=g++
+CC=gcc
+
+DEBUG=-g
+LDFLAG=-Wl,-rpath . -lpthread -lrt
+COMPILE_FLAG=-Wall ${DEBUG}
+CXXFLAG=--std=c++11  ${COMPILE_FLAG}
+CFLAG=${COMPILE_FLAG}
+SFLAG=-fPIC
+LDFLAG_SO=-shared 
+
+
+.cpp.o:
+	${CXX} ${CXXFLAG} ${SFLAG} -c -o $@ $^
+
+.c.o:
+	${CC} ${CFLAG} ${SFLAG} -c -o $@ $^
+
+clean::
+	rm -f a.out *.o
+
+.PHONY: clean
