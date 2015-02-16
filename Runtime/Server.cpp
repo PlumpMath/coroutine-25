@@ -5,10 +5,9 @@ using namespace Runtime;
 Scheduler Server::scheduler(8);
 
 Server::Server(short port, const char *ip)
-    :tcp_serv_(port,ip)
+    :tcp_serv_(poller_, port, ip), timer_serv_(poller_)
 {
-    poller_.Add(&tcp_serv_,Event::POLLET|Event::POLLIN|Event::POLLRDHUP);
-    tcp_serv_.msg_handler = ParseMsg;
+
 }
 
 void Server::Loop(){
@@ -19,7 +18,19 @@ Server::~Server(){
 
 }
 
-void Server::ParseMsg(Runtime::TCPConn &, ReadBuf &buf) {
+
+TCPService::TCPService(Poller &p, short port, const char *ip)
+    :tcp_server_(port,ip), poller_(p)
+{
+    poller_.Add(&tcp_server_,Event::POLLET|Event::POLLIN|Event::POLLRDHUP);
+    tcp_server_.msg_handler = ParseMsg;
+}
+
+TCPService::~TCPService(){
+
+}
+
+void TCPService::ParseMsg(Runtime::TCPConn &, ReadBuf &buf) {
     Protocol *header = NULL;
     while(true){
         log_debug("parse msg handler stat:%d\n",buf.state);
@@ -74,6 +85,41 @@ void Server::ParseMsg(Runtime::TCPConn &, ReadBuf &buf) {
     }
 }
 
+
+TimerService::TimerService(Poller &p)
+    :poller_(p)
+{
+
+    timer_.timeout_handler = OnTimeout;
+    poller_.Add(&timer_, Event::POLLIN|Event::POLLET);
+}
+
+TimerService::~TimerService(){
+
+}
+
+
+void TimerService::Sleep(time_t sec, long msec){
+
+    sec += msec/1000;
+    msec = msec%1000;
+
+    TimeSpec t(sec, msec*1000);
+
+    Task *task = CPU::current_core->running_task;
+    timer_.SetTimer(t, task);
+
+    Task::Yield();
+}
+
+void TimerService::OnTimeout(const TimeSpec &, Task *const &t){
+    log_debug("Task :%p time out\n",t);
+    t->SetReady();
+}
+
+
+
+
 #ifdef __SERVER_UNITTEST
 #include <stdlib.h>
 
@@ -96,6 +142,13 @@ int main(int argc, char **argv){
     }
     Server s(port);
 
+    Server::scheduler.Spawn([&s](void *){
+                log_debug("before sleep\n");
+                s.Sleep(2);
+                s.Sleep(3);
+                log_debug("after sleep\n");
+            });
+    /*
     StringChannel *c = GetChannel(1);
     Server::scheduler.Spawn([c](void *){
             std::string s;
@@ -129,6 +182,7 @@ int main(int argc, char **argv){
 
             });
 
+            */
     s.Loop();
 }
 

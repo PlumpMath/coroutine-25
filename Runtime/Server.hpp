@@ -9,10 +9,37 @@
 #include "Task.hpp"
 #include "Queue.hpp"
 #include <unordered_map>
+#include "Timer.hpp"
 
 namespace Runtime{
 
     std::unordered_map<ChannelId, void *> ChannelMap;
+
+    class TCPService{
+    public:
+        TCPService(Poller &p, short port, const char *ip=NULL);
+        ~TCPService();
+
+    public:
+        static void ParseMsg(Runtime::TCPConn &conn, ReadBuf &buf) ;
+
+    private:
+        TCPServer tcp_server_;
+        Poller  &poller_;
+    };
+
+    class TimerService{
+    public:
+        TimerService(Poller &p);
+        ~TimerService();
+
+        void Sleep(time_t sec, long msec = 0);
+    public:
+        static void OnTimeout (const TimeSpec &, Task *const &t);
+    private:
+        Timer<Task *> timer_;
+        Poller  &poller_;
+    };
 
     class Server{
     public:
@@ -20,17 +47,18 @@ namespace Runtime{
         ~Server();
         void Loop();
 
-    public:
-        static void ParseMsg(Runtime::TCPConn &conn, ReadBuf &buf) ;
+        void Sleep(time_t sec, long msec = 0){
+            timer_serv_.Sleep(sec, msec);
+        }
 
     private:
-        TCPServer tcp_serv_;
         Epoll  poller_;
+        TCPService tcp_serv_;
+        TimerService timer_serv_;
 
     public:
         static Scheduler scheduler;
     };
-
 
 }
 

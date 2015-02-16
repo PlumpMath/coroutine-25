@@ -115,14 +115,17 @@ namespace Runtime{
     class Timer:public Pollable{
     public:
         // TODO: only support Clock::REALTIME now, support ClockType::MONOTONIC.
-        Timer(Poller &p, ClockType timer_type = ClockType::REALTIME)
-            :poller_(p), id_(0)
+        Timer(ClockType timer_type = ClockType::REALTIME)
+            : id_(0)
         {
             timer_fd_ = timerfd_create((clockid_t)timer_type,TFD_NONBLOCK|TFD_CLOEXEC);
             if (timer_fd_ < 0 ){
                 SYSERROR();
             }
-            poller_.Add(this, Event::POLLIN|Event::POLLET);
+
+            timeout_handler = [](const TimeSpec &top, T const &t){
+                log_debug("timer:%u , userdata:%p\n",top.timer_id, t);
+            };
         }
 
         ~Timer() noexcept{
@@ -172,7 +175,7 @@ namespace Runtime{
                 buf_.pop();
 
                 try{
-                    log_debug("timer:%u , userdata:%d\n",top.timer_id, userdata_map.at(top.timer_id));
+                    timeout_handler(top, userdata_map.at(top.timer_id));
                 }catch(...){
                     log_debug("error timer:%u \n",top.timer_id);
 
@@ -185,7 +188,7 @@ namespace Runtime{
             }
         }
 
-        TimerId SetTimer(const TimeSpec &t, const T &userdata){
+        TimerId SetTimer(const TimeSpec &t, T const &userdata){
 
             std::lock_guard<std::mutex> _(buf_lock_);
 
@@ -226,13 +229,14 @@ namespace Runtime{
             }
         }
     private:
-        Poller &poller_;
-
         int timer_fd_;
         TimerBuffer buf_;
         TimerId id_;
         std::mutex buf_lock_;
         std::unordered_map<TimerId, T> userdata_map;
+
+    public:
+        std::function<void(const TimeSpec &, T const &)> timeout_handler;
     };
 
 }//namespace Runtime
