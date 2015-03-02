@@ -1,18 +1,25 @@
 #ifndef __CHANNEL_HPP
 #define __CHANNEL_HPP
 
-#include "Queue.hpp"
 #include "Task.hpp"
 #include "Logger.hpp"
+#include <utility>
+#include "Select.hpp"
+#include <deque>
 
 namespace Runtime{
     typedef int ChannelId;
     //static std::atomic<int>  gen_channel_id;
 
+    template<typename T> class Select;
     template<typename T>
     class Channel{
-        typedef typename Queue<T>::NonBlockQ ChannelQ;
+        typedef Select<T> Selector;
+        typedef std::deque<T> ChannelQ;
+        typedef std::deque<Selector *> WaitQ;
     public:
+        friend Selector;
+
         Channel(ChannelId id = -1)
             :id_(id)
         {
@@ -24,38 +31,52 @@ namespace Runtime{
             return *this;
         }
 
+        bool Cancel(Selector *const &slt){
+            std::lock_guard<std::mutex> _(ch_lock_);
+            for(auto it = recvq_.begin(); it!=recvq_.end(); ++it){
+                if (*it == slt){
+                    recvq_.erase(it);
+                    return true;
+                }
+            }
+            return false;
+        }
+
         inline void Put(const T &t){
             std::lock_guard<std::mutex> _(ch_lock_);
-            Task *task = waitq_.PopFront(NULL);
-            if (task != NULL){
-                returnq_.Push(t);
-                task->SetReady(); 
-            }else{
-                q_.Push(t);
+
+            Selector *selector;
+            while(true){
+                if (recvq_.empty()){
+                    q_.push_back(t);
+                    return;
+                }
+
+                selector = recvq_.front();
+                recvq_.pop_front();
+
+                // lock to ensure only wakeup once.
+                if (selector->Return(t)){
+                    return;
+                }
             }
         }
 
         ChannelId ID() const{
             return id_;
         }
+        
+        void SelectNoLock(Select<T> *selector){
+            if (!q_.empty()){
+                selector->FastReturn(q_.front());
+                q_.pop_front();
+            }
+        }
 
         T Get(){
-            ch_lock_.lock();
-            if (q_.Empty()){
-                Task * task = CPU::current_core->running_task;
-                task->State = TaskState::WAITING;
-                waitq_.Push(task);
-                ch_lock_.unlock();
-
-                Task::Yield2();
-
-                // returnq_ 已经是thread-safe，不需要ch_lock_
-                return returnq_.PopFront();
-            }else{
-                T t = q_.PopFront();
-                ch_lock_.unlock();
-                return t;
-            }
+            Selector s(*this);
+            s.Wait();
+            return s.v;
         }
 
     private:
@@ -63,11 +84,14 @@ namespace Runtime{
 
         ChannelQ q_;
 
-        ChannelQ returnq_;
-        // 用于确保q_.Empty和waitq_.Push的一致性。
         std::mutex ch_lock_;
 
-        Queue<Task *>::NonBlockQ waitq_;
+        WaitQ recvq_;
+
+        /* 
+         * TODO: support block send.
+        WaitQ sendq_;
+        */
     };
 }
 
