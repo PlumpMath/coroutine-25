@@ -6,7 +6,7 @@ UNITTESTBIN=event log task cli timer
 
 COMPILE_FLAG += -DRUNTIME_LOG_ENABLE
 
-default:log
+default:${BIN}
 
 event:
 	g++ --std=c++0x Event.cpp Exception.cpp -o $@
