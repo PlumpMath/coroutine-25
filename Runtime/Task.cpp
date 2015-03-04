@@ -39,7 +39,7 @@ Task::Task(TaskFunctor f, void *arg, size_t ss)
     if(ss <= 0){
         ss = TASK_STACK_SIZE;
     }
-    State = TaskState::NEW;
+    state_ = TaskState::NEW;
     stack_size = TASK_STACK_SIZE;
 }
 
@@ -50,7 +50,7 @@ void Task::init_context(CPU *core){
     uctx_.uc_stack.ss_sp = stack_ptr_;
     uctx_.uc_link = &core->sched_context;
     MakeContext(&uctx_, (ContextFunc)&Task::MainFunc, arg_);
-    State = TaskState::READY;
+    state_ = TaskState::READY;
     BindCPU = core;
 }
 
@@ -71,32 +71,49 @@ void Task::MainFunc(int p1, int p2) noexcept{
         printf("get unknown exception\n");
     }
 
-    t->State = TaskState::DEAD;
+    t->state_ = TaskState::DEAD;
 }
 
 
 void Task::Resume() noexcept{
-    Task *t = CPU::current_core->running_task;
 
-    if (t->State == TaskState::NEW){
-        t->init_context(CPU::current_core);
+    std::lock_guard<std::mutex> _(task_lock_);
+
+    if (state_ == TaskState::NEW){
+        init_context(CPU::current_core);
     }
 
-    t->State = TaskState::RUNNING;
-    SwapContext(&CPU::current_core->sched_context, &t->uctx_);
+    state_ = TaskState::RUNNING;
+    SwapContext(&CPU::current_core->sched_context, &uctx_);
+
+    switch (state_){
+    case TaskState::SCHED:
+        BindCPU->PutPrivateTask(this);
+        break;
+    case TaskState::READY:
+    case TaskState::SUSPEND:
+    case TaskState::WAITING:
+    case TaskState::DEAD:
+    default:
+        break;
+    }
 }
 
-// Can only run in Task
+void Task::SetReady(){
+    std::lock_guard<std::mutex> _(task_lock_);
+    if (state_ == TaskState::WAITING){
+        state_ = TaskState::READY;
+        BindCPU->PutPrivateTask(this); 
+        return;
+    }
+
+    THROW(TaskError);
+}
+
+// Can only run in Task. Already have task_lock_.
 void Task::Yield() noexcept{
-    Task *t = CPU::current_core->running_task;
-    t->State = TaskState::WAITING;
-    SwapContext(&t->uctx_, &(CPU::current_core->sched_context));
-}
-
-// Yield*不能在事务中调用，但State必须在事务中修改。
-void Task::Yield2() noexcept{
-    Task *t = CPU::current_core->running_task;
-    SwapContext(&t->uctx_, &(CPU::current_core->sched_context));
+    state_ = TaskState::WAITING;
+    SwapContext(&uctx_, &(CPU::current_core->sched_context));
 }
 
 TaskQ::TaskQ(Scheduler &s)
@@ -153,17 +170,10 @@ void CPU::Run(){
 
         current_core->running_task = t;
 
-        Task::Resume();
+        t->Resume();
 
-        switch (t->State){
-        case TaskState::READY:
-            PutPrivateTask(t);
-            break;
-        case TaskState::SUSPEND:
-        case TaskState::WAITING:
-            break;
-        case TaskState::DEAD:
-        default:
+        // TODO: reuse this task.
+        if(t->State()==TaskState::DEAD){
             log_debug("delete task:%p, private_queue_ size: %d \n", t, PrivateTaskSize());
             delete t;
         }
@@ -231,13 +241,13 @@ public:
 void test1(void *t){
     printf("test1 before yield \n");
     Test a;
-    Task::Yield();
+    Yield();
     throw "XXX";
     printf("test1 after yield, exit test1 \n");
 }
 void test2(void *t){
     printf("test2 before yield \n");
-    Task::Yield();
+    Yield();
     printf("test2 after yield, exit test2 \n");
 }
 
@@ -258,7 +268,7 @@ int main(int argc, char **argv){
         sched.Spawn([i](void *t){
                 uintptr_t a = (uintptr_t)t;
                 printf("test%d before arg:%d yield\n", i, a);
-                Task::Yield();
+                Yield();
                 printf("test%d after yield, exit now\n",i);
                 },(void *)222222);
     }

@@ -65,9 +65,10 @@ namespace Runtime{
 
     enum class TaskState{
         NEW = 0,
-        READY,
-        RUNNING,
-        WAITING,
+        READY,           // runnable.
+        SCHED,           // simply abandon CPU.
+        RUNNING,         // running.
+        WAITING,         // abandon CPU because of waiting for some condition.
         SUSPEND,
         DEAD,
     };
@@ -82,44 +83,53 @@ namespace Runtime{
     typedef void (*TaskFunc)(void *);
     typedef size_t TaskID;
 
+    class TaskError:public Exception{
+    public:
+        TaskError(const char *func,int line)
+            :Exception(func,line,"task state is not WAITING")
+        {
+        }
+    };
+
+
     class Task{
     public:
         Task(TaskFunc f, void *arg, size_t ss = 0);
         Task(TaskFunctor f, void *arg, size_t ss = 0);
         ~Task() noexcept;
 
-        TaskID Id() const{
-            return task_id_;
-        }
+        void SetReady();
+        void Resume() noexcept;
+        void Yield() noexcept;
 
         void Run(void *arg){
             func_(arg);
         }
 
-        inline void SetReady() noexcept {
-            State = TaskState::READY;
-            BindCPU->PutPrivateTask(this); 
+        TaskID Id() const{
+            return task_id_;
         }
 
+        inline TaskState State() const{
+            return state_;
+        }
     private:
         void init_context(CPU *);
 
     public:
         //64-bit intel
         static void MainFunc(int p1, int p2) noexcept;
-        static void Resume() noexcept;
-
-        // Can only run in Task
-        static void Yield() noexcept;
-        static void Yield2() noexcept;
 
     public:
-        TaskState State;
         CPU *BindCPU;
         size_t Calls;
 
     private:
         static std::atomic<TaskID> task_id ;
+
+    private:
+        TaskState state_;
+        std::mutex task_lock_;
 
         ucontext_t uctx_;
         TaskID task_id_;
@@ -164,6 +174,10 @@ namespace Runtime{
         std::vector<CPU *> cpus_;
     };
 
+    // Can only run in Task
+    inline void Yield(){
+        CPU::current_core->running_task->Yield();
+    }
 }
 #endif// __TASK_HPP
 

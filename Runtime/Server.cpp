@@ -109,7 +109,7 @@ void TimerService::Sleep(time_t sec, long msec){
     Task *task = CPU::current_core->running_task;
     timer_.SetTimer(t, task);
 
-    Task::Yield();
+    Yield();
 }
 
 void TimerService::OnTimeout(const TimeSpec &, Task *const &t){
