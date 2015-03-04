@@ -112,10 +112,10 @@ namespace Runtime{
 
 #ifdef RUNTIME_LOG_ENABLE
 extern Runtime::Logger log;
-#define log_debug(fmt,...) log.Debug(fmt,##__VA_ARGS__)
-#define log_info(fmt,...) log.Info(fmt,##__VA_ARGS__)
-#define log_warn(fmt,...) log.Warn(fmt,##__VA_ARGS__)
-#define log_error(fmt,...) log.Error(fmt,##__VA_ARGS__)
+#define log_debug(fmt,...) Runtime::log.Debug(fmt,##__VA_ARGS__)
+#define log_info(fmt,...)  Runtime::log.Info(fmt,##__VA_ARGS__)
+#define log_warn(fmt,...)  Runtime::log.Warn(fmt,##__VA_ARGS__)
+#define log_error(fmt,...) Runtime::log.Error(fmt,##__VA_ARGS__)
 #else
 #define log_debug(fmt,...) 
 #define log_info(fmt,...) 
